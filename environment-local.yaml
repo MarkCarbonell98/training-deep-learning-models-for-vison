@@ -1,0 +1,17 @@
+channels:
+    - pytorch
+    - conda-forge
+name:
+    adl-course
+dependencies:
+    - imageio
+    - cudatoolkit=10.1
+    - pytorch
+    - scikit-image
+    - scikit-learn
+    - torchvision
+    - tqdm
+
+# required too : conda install pip
+# ~/anaconda3/envs/<env-name>/bin/pip install cifar2png
+# ~/anaconda3/envs/<env-name/bin/pip install tensorboard
