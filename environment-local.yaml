@@ -1,17 +1,17 @@
 channels:
     - pytorch
     - conda-forge
-name:
-    adl-course
+name: cvblock
 dependencies:
-    - imageio
-    - cudatoolkit=10.1
-    - pytorch
-    - scikit-image
-    - scikit-learn
+    - pytorch-gpu
     - torchvision
+    - cudatoolkit=10.1
+    - imageio
+    - scikit-learn
+    - scikit-image
     - tqdm
 
 # required too : conda install pip
 # ~/anaconda3/envs/<env-name>/bin/pip install cifar2png
 # ~/anaconda3/envs/<env-name/bin/pip install tensorboard
+# ~/anaconda3/envs/<env-name/bin/pip install tb-nightly

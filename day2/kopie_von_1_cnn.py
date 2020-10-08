@@ -20,21 +20,25 @@ In this exercise we will train our first convolutional neural network on the cif
 # %load_ext tensorboard
 
 # import torch and other libraries
+import sys
 import os
+sys.path.append(os.path.abspath(os.path.join('utils')))
+print(sys.path[-1])
 import numpy as np
 import sklearn.metrics as metrics
-import matplotlib.pyplot as plt
+import utils
 from tqdm import trange
 
 import torch
+import matplotlib.pyplot as plt
 import torch.nn as nn
 import torch.nn.functional as F
+import subprocess
 
 from torch.utils.data import DataLoader
 from torch.optim import Adam
 from torch.utils.tensorboard import SummaryWriter
-
-!pip install cifar2png
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 # check if we have gpu support
 # colab offers free gpus, however they are not activated by default.
@@ -50,14 +54,17 @@ else:
     device = torch.device('cpu')
 
 # run this in google colab to get the utils.py file
-!wget https://raw.githubusercontent.com/constantinpape/training-deep-learning-models-for-vison/master/day1/utils.py
 
 # we will reuse the training function, validation function and
 # data preparation from the previous notebook
-import utils
+bashCommand = "cifar2png cifar10 cifar10"
+process = subprocess.Popen(bashCommand.split(), stdout=subprocess.PIPE)
+output, error = process.communicate()
+print("Process output: ", output)
+print("Process error", error)
+
 
 cifar_dir = './cifar10'
-!cifar2png cifar10 cifar10
 
 categories = os.listdir('./cifar10/train')
 categories.sort()
@@ -92,24 +99,24 @@ class CNN(nn.Module):
         # after applying the convolutions and poolings, the tensor
         # has the shape 24 x 6 x 6, see below
         self.fc = nn.Sequential(
-            nn.Linear(24 * 6 * 6, 120),
-            nn.ReLU(),
-            nn.Linear(120, 60),
-            nn.ReLU(),
-            nn.Linear(60, self.n_classes)
-        )
+                nn.Linear(24 * 6 * 6, 120),
+                nn.ReLU(),
+                nn.Linear(120, 60),
+                nn.ReLU(),
+                nn.Linear(60, self.n_classes)
+                )
         self.activation = nn.LogSoftmax(dim=1)
 
     def apply_convs(self, x):
-      # input image has shape 3 x  32 x 32
-      x = self.pool(F.relu(self.conv1(x)))
-      # shape after conv: 12 x 28 x 28
-      # shape after pooling: 12 x 14 X 14
-      x = self.pool(F.relu(self.conv2(x)))
-      # shape after conv: 24 x 12 x 12
-      # shape after pooling: 24 x 6 x 6
-      return x
-    
+        # input image has shape 3 x  32 x 32
+        x = self.pool(F.relu(self.conv1(x)))
+        # shape after conv: 12 x 28 x 28
+        # shape after pooling: 12 x 14 X 14
+        x = self.pool(F.relu(self.conv2(x)))
+        # shape after conv: 24 x 12 x 12
+        # shape after pooling: 24 x 6 x 6
+        return x
+
     def forward(self, x):
         x = self.apply_convs(x)
         x = x.view(-1, 24 * 6 * 6)
@@ -117,7 +124,7 @@ class CNN(nn.Module):
         x = self.activation(x)
         return x
 
-# instantiate the model
+
 model = CNN(10)
 model.to(device)
 
@@ -138,19 +145,18 @@ tb_logger = SummaryWriter('runs/log_cnn')
 n_epochs = 10
 for epoch in trange(n_epochs):
     utils.train(model, train_loader, loss_function, optimizer,
-                device, epoch, tb_logger=tb_logger)
+            device, epoch, tb_logger=tb_logger)
     step = (epoch + 1) * len(train_loader)
     utils.validate(model, val_loader, loss_function,
-                   device, step,
-                   tb_logger=tb_logger)
+            device, step,
+            tb_logger=tb_logger)
 
-# evaluate the model on test data
+    # evaluate the model on test data
 test_dataset = utils.make_cifar_test_dataset(cifar_dir)
 test_loader = DataLoader(test_dataset, batch_size=25)
 predictions, labels = utils.validate(model, test_loader, loss_function,
-                                     device, step=0, tb_logger=None)
+        device, step=0, tb_logger=None)
 
-import matplotlib.pyplot as plt
 print("Test accuracy:")
 accuracy = metrics.accuracy_score(labels, predictions)
 print(accuracy)
@@ -175,15 +181,15 @@ def save_checkpoint(model, optimizer, epoch, save_path):
         'epoch': epoch,
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict()
-    }, save_path)
+        }, save_path)
 
 
-def load_checkpoin(save_path, model, optimizer):
-    checkpoint = torch.load(save_path)
-    model.load_state_dict(checkpoint['model_state_dict']) 
-    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-    epoch = checkpoint['epoch']
-    return model, optimizer, epoch
+    def load_checkpoin(save_path, model, optimizer):
+        checkpoint = torch.load(save_path)
+        model.load_state_dict(checkpoint['model_state_dict']) 
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        epoch = checkpoint['epoch']
+        return model, optimizer, epoch
 
 # instantiate loaders, loss, optimizer and tensorboard
 
@@ -211,23 +217,22 @@ best_epoch = 0
 # it starts to plateau
 # NOTE: it's usually better to choose a higher patience value than a single epoch,
 # we choose this value here in order to observe the changes when only training for 15 epochs
-from torch.optim.lr_scheduler import ReduceLROnPlateau
 scheduler = ReduceLROnPlateau(optimizer,
-                              mode='max',  # we evaluate based on accuracy, for which higher values are better
-                              factor=0.5,  # half the learning rate
-                              patience=1)  # number of epochs without improvement after which we reduce the lr
+        mode='max',  # we evaluate based on accuracy, for which higher values are better
+        factor=0.5,  # half the learning rate
+        patience=1)  # number of epochs without improvement after which we reduce the lr
 
 for epoch in trange(n_epochs):
     utils.train(model, train_loader, loss_function, optimizer,
-                device, epoch, tb_logger=tb_logger)
+            device, epoch, tb_logger=tb_logger)
     step = (epoch + 1) * len(train_loader)
 
     pred, labels = utils.validate(model, val_loader, loss_function,
-                                  device, step,
-                                  tb_logger=tb_logger)
+            device, step,
+            tb_logger=tb_logger)
     val_accuracy = metrics.accuracy_score(labels, pred)
     scheduler.step(val_accuracy)
-    
+
     # otherwise, check if this is our best epoch
     if val_accuracy > best_accuracy:
         # if it is, save this check point
@@ -245,9 +250,8 @@ print("Best checkpoint is", best_epoch)
 test_dataset = utils.make_cifar_test_dataset(cifar_dir)
 test_loader = DataLoader(test_dataset, batch_size=25)
 predictions, labels = utils.validate(model, test_loader, loss_function,
-                                     device, step=0, tb_logger=None)
+        device, step=0, tb_logger=None)
 
-import matplotlib.pyplot as plt
 print("Test accuracy:")
 accuracy = metrics.accuracy_score(labels, predictions)
 print(accuracy)
@@ -270,7 +274,6 @@ conv1_response = model.conv1(im).detach().numpy()[0]
 print(conv1_response.shape)
 
 # visualize the filters in the first layer
-import matplotlib.pyplot as plt
 n_filters = 8
 fig, axes = plt.subplots(1, 1 + n_filters, figsize=(16, 4))
 im = im[0].numpy().transpose((1, 2, 0))

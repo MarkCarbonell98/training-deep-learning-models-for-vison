@@ -243,7 +243,7 @@ def train(model, loader,
             # TODO make logging more pretty, see
             # https://www.tensorflow.org/tensorboard/image_summaries
             tb_logger.add_images(tag='input',
-                                 img_tensor=x.to('cpu'),
+                                 img_tensor=x.to(device),
                                  global_step=step)
 
 
@@ -289,8 +289,8 @@ def validate(model, loader, loss_function,
             prediction = prediction.max(1, keepdim=True)[1]
 
             # store the predictions and labels
-            predictions.append(prediction[:, 0].to('cpu').numpy())
-            labels.append(y[:, 0].to('cpu').numpy())
+            predictions.append(prediction[:, 0].cpu().numpy())
+            labels.append(y[:, 0].cpu().numpy())
 
     # predictions and labels to numpy arrays
     predictions = np.concatenate(predictions)
@@ -332,8 +332,8 @@ def run_cifar_training(model, optimizer,
                                   factor=0.5,
                                   patience=1)
 
-    checkpoint_path = f'best_checkpoint_{name}.tar'
-    log_dir = f'runs/{name}'
+    checkpoint_path = "best_checkpoint_%s.tar".format(name)
+    log_dir = 'runs/%s'.format(name)
     tb_logger = SummaryWriter(log_dir)
 
     for epoch in trange(n_epochs):
@@ -426,3 +426,10 @@ class SimpleCNN(nn.Module):
         x = self.fc(x)
         x = self.activation(x)
         return x
+
+def apply_filters(img, target, filter_list, keep_image=False):
+    filtered = [img] if keep_image else []
+    for filter_fn in filter_list:
+        filtered.append(filter_fn(img))
+    data = np.concatenate(filtered, axis=-1)
+    return data, target
