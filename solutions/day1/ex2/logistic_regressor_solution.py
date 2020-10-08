@@ -16,10 +16,10 @@ import tqdm
 import matplotlib.pyplot as plt
 import tensorboard
 
-tb = tensorboard.program.TensorBoard()
-tb.configure(argv=[None, '--logdir', 'runs/logistic_regressor_conv_filters'])
-url = tb.launch()
-print('TensorBoard running on: ', url) 
+# tb = tensorboard.program.TensorBoard()
+# tb.configure(argv=[None, '--logdir', 'runs/logistic_regressor_conv_filters'])
+# url = tb.launch()
+# print('TensorBoard running on: ', url) 
 
 
 # bashCommand = "tensorboard --logdir runs"

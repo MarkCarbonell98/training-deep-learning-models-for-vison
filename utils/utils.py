@@ -332,8 +332,8 @@ def run_cifar_training(model, optimizer,
                                   factor=0.5,
                                   patience=1)
 
-    checkpoint_path = "best_checkpoint_%s.tar".format(name)
-    log_dir = 'runs/%s'.format(name)
+    checkpoint_path = "best_checkpoint_{name}.tar".format(name=name)
+    log_dir = 'runs/{name}'.format(name=name)
     tb_logger = SummaryWriter(log_dir)
 
     for epoch in trange(n_epochs):

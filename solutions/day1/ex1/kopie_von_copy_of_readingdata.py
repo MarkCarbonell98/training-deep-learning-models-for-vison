@@ -126,19 +126,13 @@ print(image.shape)
 # are functions that take bot the data (or image) and target as parameters.
 # thus we here accept the target (which is just the class label for the image) 
 # as second parameter and return it without changing it
-def to_channel_first(image, target):
-    """ Transform images with color channel last (WHC) to channel first (CWH)
-    """
-    # put channel first
-    image = image.transpose((2, 0, 1)) # sets the last axis to be the first one, first axis to be the second one, and second axis as the last one
-    return image, target
 
 # next, let's see what datatype and value range our images have
 label = label_list[0]
 print(image.dtype)
 print(image.min(), image.max())
 print(image.shape)
-transformed_image, _ = to_channel_first(image, label)
+transformed_image, _ = utils.to_channel_first(image, label)
 print(transformed_image.shape)
 print(image.min(axis=(1,2)).shape) # returns 1D list with the min values
 print(image.min(axis=(1,2), keepdims=True).shape) # returns the same list buth keeping the dimensions of the original image
@@ -146,21 +140,9 @@ print(image.min(axis=(1,2), keepdims=True).shape) # returns the same list buth k
 # as we can see, the images are stored as 8 bit integers with a value range [0, 255]
 # instead, torch expects images as 32 bit floats that should also be normalized to a 'reasonable' data range.
 # here, we normalize the image such that all channels are in range 0 to 1
-def normalize(image, target, channel_wise=True):
-    eps = 1.e-6
-    image = image.astype('float32')
-    chan_min = image.min(axis=(1, 2), keepdims=True)
-    image -= chan_min
-    chan_max = image.max(axis=(1, 2), keepdims=True)
-    image /= (chan_max + eps)
-    return image, target
-
 
 # finally, we need to transform the input from a numpy array to a torch tensor
 # and also return the target (which in our case is a scalar) as a tensor
-def to_tensor(image, target):
-    return torch.from_numpy(image), torch.tensor([target], dtype=torch.int64)
-
 
 # we also need a way to apply multiple transforms
 # (note that alternatively we could also have accepted a list of transforms
@@ -172,11 +154,10 @@ def compose(image, target, transforms):
 
 # create the dataset with the transformations
 
-trafos = [to_channel_first, normalize, to_tensor]
+trafos = [utils.to_channel_first, utils.normalize, utils.to_tensor]
 trafo = partial(compose, transforms=trafos) # freezes compose with trafos as a function call
 
 dataset = utils.DatasetWithTransform(images, labels, transform=trafo)
-print(len(dataset))
 
 # function to show an image target pair returned from the dataset
 def show_image(ax, image, target, trafo_name):
@@ -185,7 +166,7 @@ def show_image(ax, image, target, trafo_name):
     # find the label name
     label = categories[target.item()]
     ax.imshow(image)
-    ax.set_title("%s : %s".format(label, trafo_name))
+    ax.set_title("{label} : {trafo_name}".format(label=label, trafo_name=trafo_name))
 
 def show_sample_images(dataset, n_samples, ids):
     n = len(dataset)
@@ -195,8 +176,7 @@ def show_sample_images(dataset, n_samples, ids):
         img, target = dataset[id]
         trafo_name = dataset.transform.keywords['transforms'][-1].__name__
 
-        assert np.isclose(image.min(), 0.)
-        assert np.isclose(image.max(), 1.)
+        print("Min: ", img.min(), "Max: ", img.max())
 
         show_image(ax[sample], img, target, trafo_name)
 
@@ -241,16 +221,19 @@ def crop(image, target):
     return image, target
 
 
-
+n = len(dataset)
+n_imgs = 8
 def apply_and_show_transforms(transforms):
-    ids = np.random.randint(0, 50000, (8,1)).tolist()
+    ids = np.random.randint(0, n, (n_imgs,1)).tolist()
     for new_trafo in transforms:
-        all_trafos = [to_channel_first, normalize, to_tensor, new_trafo]
+        all_trafos = [  utils.to_channel_first, utils.normalize, utils.to_tensor, new_trafo]
         trafo = partial(compose, transforms=all_trafos)
         dataset = utils.DatasetWithTransform(images, labels, transform=trafo)
-        show_sample_images(dataset, 8, ids)
+        show_sample_images(dataset, n_imgs, ids)
 
 apply_and_show_transforms([rotate90, rotate180, rotate270, blur, edge, red, green, blue, crop])
+
+plt.show()
 
 """## Torchvision
 

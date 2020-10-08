@@ -3,7 +3,7 @@ import torch
 import math
 import matplotlib.pyplot as plt
 
-def gaussian_kernel(dim=3, mean = 1, std=3, channels = 3):
+def gaussian_kernel(dim=3, mean = .5, std=.5):
     x = torch.arange(dim, dtype=torch.float32)
     x_grid = x.repeat(dim).view(dim, dim)
     y_grid = x_grid.t()
@@ -27,9 +27,8 @@ class LogisticRegressor(nn.Module):
         self.conv2 = nn.Conv2d(in_channels=6, out_channels=9, kernel_size=3, bias=False, padding=1)
 
         with torch.no_grad():
-            gaussian_filter = gaussian_kernel(dim=3, channels=3)
+            gaussian_filter = gaussian_kernel(dim=3)
             laplacian_filter = torch.Tensor([[0,1,0], [1,-4,1], [0,1,0]])
-            print(self.conv1.weight.data)
             self.conv1.weight.data[:,:] = gaussian_filter
             self.conv2.weight.data[:,:] = laplacian_filter
 
