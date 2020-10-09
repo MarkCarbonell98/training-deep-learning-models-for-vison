@@ -148,16 +148,22 @@ def make_cifar_test_dataset(cifar_dir, transform=None):
 # checkpoints
 #
 
-def save_checkpoint(model, optimizer, epoch, save_path):
+def save_checkpoint(model, optimizer, epoch, save_path, checkpoint_dir="checkpoints"):
+    if not os.path.exists(checkpoint_dir):
+        os.makedirs(checkpoint_dir)
+
     torch.save({
         'epoch': epoch,
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict()
-    }, save_path)
+    }, os.path.join(checkpoint_dir, save_path))
 
 
-def load_checkpoin(save_path, model, optimizer):
-    checkpoint = torch.load(save_path)
+def load_checkpoint(save_path, model, optimizer, checkpoint_dir="checkpoints"):
+    if not os.path.exists(checkpoint_dir):
+        print("Checkpoint directory '{dir}' not found".format(dir=checkpoint_dir))
+
+    checkpoint = torch.load(os.path.join(checkpoint_dir, save_path))
     model.load_state_dict(checkpoint['model_state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     epoch = checkpoint['epoch']
