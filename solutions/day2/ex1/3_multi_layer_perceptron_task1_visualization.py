@@ -20,6 +20,7 @@ In this exercise we will train our first convolutional neural network on the cif
 # %load_ext tensorboard
 
 # import torch and other libraries
+import time
 import os
 import sys
 sys.path.append(os.path.abspath('utils'))
@@ -30,7 +31,7 @@ from cnn import CNN
 import tqdm
 import utils
 import torch
-from cnn_adaptive_avg_pool import CNN_Adaptive_Avg_Pooling
+from cnn_more_layers_and_poolings import CNN_More_Layers_And_Poolings
 
 # check if we have gpu support
 # colab offers free gpus, however they are not activated by default.
@@ -55,6 +56,7 @@ categories.sort()
 
 # get training and validation data
 train_dataset, val_dataset = utils.make_cifar_datasets(cifar_dir)
+test_dataset = utils.make_cifar_test_dataset(cifar_dir)
 
 """## CNN
 
@@ -70,7 +72,7 @@ See the comments in network definition below for an example.
 """
 
 # instantiate the model
-model = CNN_Adaptive_Avg_Pooling(10)
+model = CNN_More_Layers_And_Poolings(10)
 model.to(device)
 
 # Commented out IPython magic to ensure Python compatibility.
@@ -79,14 +81,15 @@ model.to(device)
 train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=4, shuffle=True)
 val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=25)
 
-optimizer = torch.optim.Adam(model.parameters(), lr=1.e-3)
+lr = 1.e-3
+optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
 loss_function = torch.nn.NLLLoss()
 loss_function.to(device)
 
-tb_logger = torch.utils.tensorboard.SummaryWriter('runs/log_cnn_15_epochs_adaptive_avg_pooling')
+tb_logger = torch.utils.tensorboard.SummaryWriter('runs/log_cnn_15_epochs_more_layers_and_poolings')
 # %tensorboard --logdir runs
-n_epochs = 1
+n_epochs = 15
 
 # we use the best checkpoint as measured by the validation accuracy
 best_accuracy = 0.
@@ -101,11 +104,15 @@ scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,
         factor=0.5,  # half the learning rate
         patience=1)  # number of epochs without improvement after which we reduce the lr
 
-checkpoint_old_name = './best_checkpoint.tar'
-checkpoint_name = './best_checkpoint_reduce_on_plateau_avg_pooling.tar'
+checkpoint_name = './best_checkpoint_reduce_on_plateau_more_layers_and_poolings.tar'
 
-if not os.path.exists(checkpoint_name):
+data = []
+ttime_start = int(time.time())
+ttime_stop = 0
+if not os.path.exists(os.path.join("checkpoints", checkpoint_name)):
+    print("Training the network")
     for epoch in tqdm.trange(n_epochs):
+
         utils.train(model, train_loader, loss_function, optimizer,
                 device, epoch, tb_logger=tb_logger)
         step = (epoch + 1) * len(train_loader)
@@ -124,6 +131,8 @@ if not os.path.exists(checkpoint_name):
             # print("Saving best checkpoint for epoch", epoch)
             utils.save_checkpoint(model, optimizer, epoch, checkpoint_name)
 
+    ttime_stop = int(time.time()) - ttime_start
+    print("Total training time {ttime} sec".format(ttime=ttime_stop))
     print("Best checkpoint is", best_epoch+1)
 
 # load the model for the best checkpoint and evaluate it on the test data.
@@ -132,11 +141,10 @@ model, _, _ = utils.load_checkpoint(checkpoint_name, model, optimizer)
 
 test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=25)
 predictions, labels = utils.validate(model, test_loader, loss_function,
-        device, step=0, tb_logger=None)
+        device, step=0, tb_logger=tb_logger)
 
-print("Test accuracy:")
 accuracy = sklearn.metrics.accuracy_score(labels, predictions)
-print(accuracy)
+print("Test accuracy:", accuracy) # 0.6187
 
 """## Checkpoints and adaptive learning rate
 
@@ -145,15 +153,8 @@ The model weights can be saved in order to load the model again and run predicti
 Another important aspect of training neural networks is adapting the learning rate during training, which can increase model performance by converging to better optima. Here, we will condition the learning rate decrease on the validation accuracy using [torch.ReduceLROnPlateau](https://pytorch.org/docs/stable/optim.html#torch.optim.lr_scheduler.ReduceLROnPlateau).
 """
 
-# functions to save and load a checkpoint (= serialized model and optimizer state +
-# additional metadata)
-# instantiate loaders, loss, optimizer and tensorboard
-
-# instantiate the model
-
-
-fig, ax = plt.subplots(1, figsize=(8, 8))
-utils.make_confusion_matrix(labels, predictions, categories, ax)
+# fig, ax = plt.subplots(1, figsize=(8, 8))
+# utils.make_confusion_matrix(labels, predictions, categories, ax)
 
 """## Visualize learned filters
 
@@ -166,16 +167,27 @@ model.to(torch.device('cpu'))
 model.eval()
 im = train_dataset[0][0][None]
 
-conv1_response = model.conv1(im).detach().numpy()[0]
+conv1_response_tensor = model.conv1(im)
+conv1_response = conv1_response_tensor.detach().numpy()[0]
+conv2_response = model.conv2(conv1_response_tensor).detach().numpy()[0]
 print(conv1_response.shape)
+print(conv2_response.shape)
 
 # visualize the filters in the first layer
-n_filters = 8
-fig, axes = plt.subplots(1, 1 + n_filters, figsize=(16, 4))
+n_filters = 12
+fig = plt.figure(figsize=(20, 8))
 im = im[0].numpy().transpose((1, 2, 0))
-axes[0].imshow(im)
-for chan_id in range(n_filters):
-    axes[chan_id + 1].imshow(conv1_response[chan_id], cmap='gray')
+ax = fig.add_subplot(2, 12, 1)
+ax.imshow(im)
+ax = fig.add_subplot(2, 12, 13)
+ax.imshow(im)
+for chan_id in range(n_filters-1):
+    ax = fig.add_subplot(2, 12, chan_id + 2)
+    ax.imshow(conv1_response[chan_id], cmap='gray')
+    ax.set_title("Conv1, Filter:{fil}".format(fil=chan_id))
+    ax = fig.add_subplot(2, 12, chan_id + 2 + 12)
+    ax.imshow(conv2_response[chan_id], cmap='gray')
+    ax.set_title("Conv2, Filter:{fil}".format(fil=chan_id))
 
 plt.show()
 
@@ -189,5 +201,14 @@ Tasks:
 Questions:
 - How did the different models you have trained in this exercise perform? How do they compare to the non-convolutional models we have trained on the first day?
 - How do you interpret the convolutional filters based on their visualisations? Can you see differences between the filters in the first and deeper layers?
+"""
+
+"""
+Answers: 
+- The original CNN performed with an accuracy of about 50%. Compared to the non-convolutional models like the logistic regressor this is an overall improvement of about 10%
+- The CNN with AdaptiveAvgPool2d worked improved the performance of the original CNN by aabout 10%. Reaching 60% accuracy
+- The CNN with two extra convolutional layers, and corresponding 2d MaxPoolings performed about 4% better than the model with only the AdaptiveAvgPool2d. Reaching 64% accuracy
+
+- The convolutional filters of the first convolutional layers seem to be quite similar to the original image. In comparison with deeper filters (Up from the third convolutional layer) the filter images start to look more like patterns extracted from the image. The deeper the filter the more difficult it becomes to say what the original image looks like given the filter image.
 """
 

@@ -1,6 +1,5 @@
 import torch
 
-
 class CNN_Adaptive_Avg_Pooling(torch.nn.Module):
     def __init__(self, n_classes):
         super().__init__()

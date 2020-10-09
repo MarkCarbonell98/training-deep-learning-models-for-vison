@@ -3,7 +3,4 @@ __pycache__/
 
 cifar10/
 
-runs/
-
-*.tar
-*.tar.gz
+cifar-10-python.tar.gz
