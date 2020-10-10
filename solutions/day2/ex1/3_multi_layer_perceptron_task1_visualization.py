@@ -31,7 +31,7 @@ from cnn import CNN
 import tqdm
 import utils
 import torch
-from cnn_more_layers_and_poolings import CNN_More_Layers_And_Poolings
+from cnn_adaptive_avg_pool import CNN_Adaptive_Avg_Pooling
 
 # check if we have gpu support
 # colab offers free gpus, however they are not activated by default.
@@ -72,7 +72,7 @@ See the comments in network definition below for an example.
 """
 
 # instantiate the model
-model = CNN_More_Layers_And_Poolings(10)
+model = CNN_Adaptive_Avg_Pooling(10)
 model.to(device)
 
 # Commented out IPython magic to ensure Python compatibility.
@@ -87,7 +87,7 @@ optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 loss_function = torch.nn.NLLLoss()
 loss_function.to(device)
 
-tb_logger = torch.utils.tensorboard.SummaryWriter('runs/log_cnn_15_epochs_more_layers_and_poolings')
+tb_logger = torch.utils.tensorboard.SummaryWriter('runs/log_cnn_15_epochs_adaptive_avg_pooling')
 # %tensorboard --logdir runs
 n_epochs = 15
 
@@ -104,7 +104,7 @@ scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,
         factor=0.5,  # half the learning rate
         patience=1)  # number of epochs without improvement after which we reduce the lr
 
-checkpoint_name = './best_checkpoint_reduce_on_plateau_more_layers_and_poolings.tar'
+checkpoint_name = './best_checkpoint_reduce_on_plateau_avg_pooling.tar'
 
 data = []
 ttime_start = int(time.time())
@@ -201,14 +201,5 @@ Tasks:
 Questions:
 - How did the different models you have trained in this exercise perform? How do they compare to the non-convolutional models we have trained on the first day?
 - How do you interpret the convolutional filters based on their visualisations? Can you see differences between the filters in the first and deeper layers?
-"""
-
-"""
-Answers: 
-- The original CNN performed with an accuracy of about 50%. Compared to the non-convolutional models like the logistic regressor this is an overall improvement of about 10%
-- The CNN with AdaptiveAvgPool2d worked improved the performance of the original CNN by aabout 10%. Reaching 60% accuracy
-- The CNN with two extra convolutional layers, and corresponding 2d MaxPoolings performed about 4% better than the model with only the AdaptiveAvgPool2d. Reaching 64% accuracy
-
-- The convolutional filters of the first convolutional layers seem to be quite similar to the original image. In comparison with deeper filters (Up from the third convolutional layer) the filter images start to look more like patterns extracted from the image. The deeper the filter the more difficult it becomes to say what the original image looks like given the filter image.
 """
 

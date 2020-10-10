@@ -59,3 +59,5 @@ Practical part:
 ### Day 5:
 
 Work on exercise and presentation of exercise results.
+
+# Answers to exercises...

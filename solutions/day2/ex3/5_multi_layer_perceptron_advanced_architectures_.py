@@ -20,7 +20,10 @@ Train more advanced architectures on CIFAR10.
 # %load_ext tensorboard
 
 # import torch and other libraries
+
 import os
+import sys
+sys.path.append(os.path.abspath('utils'))
 import numpy as np
 import sklearn.metrics as metrics
 import matplotlib.pyplot as plt
@@ -29,8 +32,9 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.optim import Adam
+from torchvision.models import resnet18
+import utils
 
-!pip install cifar2png
 
 # check if we have gpu support
 # colab offers free gpus, however they are not activated by default.
@@ -46,14 +50,11 @@ else:
     device = torch.device('cpu')
 
 # run this in google colab to get the utils.py file
-!wget https://raw.githubusercontent.com/constantinpape/training-deep-learning-models-for-vison/master/day1/utils.py
 
 # we will reuse the training function, validation function and
 # data preparation from the previous notebook
-import utils
 
 cifar_dir = './cifar10'
-!cifar2png cifar10 cifar10
 
 categories = os.listdir('./cifar10/train')
 categories.sort()
@@ -65,7 +66,6 @@ Torchvision offers implementations for several [common classification models](ht
 Here, we will use the popular [ResNet](https://arxiv.org/abs/1512.03385). This architecture uses skip connections to improve gradient flow.
 """
 
-from torchvision.models import resnet18
 # load the smallest available resnet architecture (resnet18)
 # and apply the LogSoftmax activation to its output to be compatible with our loss function
 model = nn.Sequential(resnet18(num_classes=10), nn.LogSoftmax(dim=1))
@@ -82,6 +82,7 @@ optimizer = Adam(model.parameters(), lr=1.e-3)
 # %tensorboard --logdir runs
 
 n_epochs = 5
+print("Training resnet18")
 utils.run_cifar_training(model, optimizer,
                          train_loader, val_loader,
                          device=device, name='resnet18', 
@@ -93,7 +94,6 @@ test_loader = DataLoader(test_dataset, batch_size=25)
 predictions, labels = utils.validate(model, test_loader, nn.NLLLoss(),
                                      device, step=0, tb_logger=None)
 
-import matplotlib.pyplot as plt
 print("Test accuracy:")
 accuracy = metrics.accuracy_score(labels, predictions)
 print(accuracy)

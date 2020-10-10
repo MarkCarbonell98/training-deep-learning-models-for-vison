@@ -32,7 +32,7 @@ from tqdm import trange
 from mlp import MLP
 from mlp_sigmoid import MLP_Sigmoid
 from mlp_more_layers import MLP_More_Layers
-from mlp_softmin import MLP_Softmin
+from mlp_softmax import MLP_Softmax
 import tqdm
 import torch
 
@@ -88,7 +88,7 @@ tb_logger = torch.utils.tensorboard.SummaryWriter('runs/log_mlp')
 # train for a couple of epochs
 fig1 = plt.figure(figsize=(35,35))
 lr = 1.e-4
-models = [(MLP(3072, 10), 'MLP LogSoftmax (Base)'), (MLP_Sigmoid(3072, 10), 'MLP LogSigmoid'), (MLP_Softmin(3072, 10), 'MLP Softmin'), (MLP_More_Layers(3072, 10), 'MLP More Layers')]
+models = [(MLP(3072, 10), 'MLP LogSoftmax (Base)'), (MLP_Sigmoid(3072, 10), 'MLP LogSigmoid'), (MLP_Softmax(3072, 10), 'MLP Softmax'), (MLP_More_Layers(3072, 10), 'MLP More Layers')]
 data = []
 for i, (model, model_name) in enumerate(models):
     print(model, model_name)

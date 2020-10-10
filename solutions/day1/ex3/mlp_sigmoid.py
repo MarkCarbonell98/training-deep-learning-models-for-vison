@@ -12,13 +12,13 @@ class MLP_Sigmoid(torch.nn.Module):
         # unit, short ReLu
         self.layers = torch.nn.Sequential(
             torch.nn.Linear(n_pixels, 400),
-            torch.nn.ReLU(),
+            torch.nn.LogSigmoid(),
             torch.nn.Linear(400, 200),
-            torch.nn.ReLU(),
+            torch.nn.LogSigmoid(),
             torch.nn.Linear(200, 100),
-            torch.nn.ReLU(),
+            torch.nn.LogSigmoid(),
             torch.nn.Linear(100, 50),
-            torch.nn.ReLU(),
+            torch.nn.LogSigmoid(),
             torch.nn.Linear(50, n_classes),
             torch.nn.LogSigmoid()
         )
