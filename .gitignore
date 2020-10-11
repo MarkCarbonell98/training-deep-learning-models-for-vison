@@ -7,5 +7,6 @@ vdsr_train/
 vdsr_test/
 nuclei_train_data/
 nuclei_val_data/
+runs/**
 
 cifar-10-python.tar.gz

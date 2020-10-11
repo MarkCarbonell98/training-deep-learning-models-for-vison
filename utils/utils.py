@@ -22,6 +22,11 @@ from tqdm import tqdm, trange
 #
 # helper functions to load and split the data
 #
+def clip_to_uint8(arr):
+    """
+    Converts a given torch tensor assumed to be [-0.5, 0.5]-normalized into a uint8 tensor
+    """
+    return torch.clamp((arr + 0.5) * 255.0 + 0.5, 0, 255).type(torch.uint8)
 
 def load_cifar(data_dir):
     images = []

@@ -19,6 +19,8 @@ In this notebook, we will implement "Noise2Noise: Learning Image Restoration wit
 # %matplotlib inline
 # %load_ext tensorboard
 import os
+import sys
+sys.path.append(os.path.abspath('utils'))
 import imageio
 import matplotlib.pyplot as plt
 import numpy as np
@@ -30,7 +32,15 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.nn import functional as F
 from torchvision import transforms
+from vdsr_dataset import VdsrDataset
+from augment_gaussian import AugmentGaussian
+from augment_poisson import AugmentPoisson
+from training_utils import train, validate
+import tqdm
+from psnr import PSNR
+from unet import UNet
 
+import utils
 from skimage.metrics import peak_signal_noise_ratio
 
 from pathlib import Path
@@ -41,55 +51,10 @@ For this excercise will use the [VDSR dataset](https://cv.snu.ac.kr/research/VDS
 Let's start with downloading and unzipping the data.
 """
 
-!wget https://cv.snu.ac.kr/research/VDSR/train_data.zip
-!wget https://cv.snu.ac.kr/research/VDSR/test_data.zip
-!mkdir -p vdsr_train
-!mkdir -p vdsr_test
-!unzip -qq train_data.zip -d vdsr_train && rm train_data.zip
-!unzip -qq test_data.zip -d vdsr_test && rm test_data.zip
-
 """Same as in previous excerices we're going to create our custom `Dataset` class for loading all the images from disk."""
 
 # in the below implementation the 'noise_transform' should be a Callable which takes an image and returns
 # a tuple of two images
-
-class VdsrDataset(Dataset):
-    def __init__(self, root_dir, noise_transform, crop_size=256):
-        image_suffixes = (".jpeg", ".jpg", ".png", ".bmp")
-        self.image_paths = [p for p in Path(root_dir).glob("**/*") if p.suffix.lower() in image_suffixes]
-        assert noise_transform is not None
-        # transforms the image according to the noise model
-        self.noise_transform = noise_transform
-        #  standard transformations to apply to the input images
-        self.inp_transforms = transforms.Compose([
-            # randomly crop the image, paddig if necessary
-            transforms.RandomCrop(crop_size, pad_if_needed=True, padding_mode='reflect'),
-            # converts numpy.ndarray (H x W x C) in the range [0, 255] to a torch.FloatTensor of shape (C x H x W) in the range [0.0, 1.0]
-            transforms.ToTensor()
-        ])
-        
-    # get the total number of samples
-    def __len__(self):
-        return len(self.image_paths)
-
-    # fetch the training sample given its index
-    def __getitem__(self, idx):
-        # read image from disk
-        img = imageio.imread(self.image_paths[idx])
-        # convert signle-channel images
-        if img.ndim == 2:
-            img = np.stack([img, img, img], axis=2)
-        elif img.shape[2] == 1:
-            img = np.concatenate([img, img, img], axis=2)
-        # convet to PIL image
-        img = Image.fromarray(img)
-        # apply standard augmentations
-        img = self.inp_transforms(img)
-        # convert [0, 1] to [-0.5, 0.5]
-        img = img - 0.5
-        # apply the noise model and return a source and target image
-        return self.noise_transform(img)
-
 """Let's create the training dataset and show some of the images"""
 
 TRAIN_DATA_PATH = 'vdsr_train'
@@ -97,11 +62,6 @@ TRAIN_DATA_PATH = 'vdsr_train'
 t = lambda x: (x, x)
 train_data = VdsrDataset(TRAIN_DATA_PATH, noise_transform=t)
 
-def clip_to_uint8(arr):
-    """
-    Converts a given torch tensor assumed to be [-0.5, 0.5]-normalized into a uint8 tensor
-    """
-    return torch.clamp((arr + 0.5) * 255.0 + 0.5, 0, 255).type(torch.uint8)
 
 def show_random_dataset_image(dataset):
     idx = np.random.randint(0, len(dataset))    # take a random sample
@@ -110,8 +70,8 @@ def show_random_dataset_image(dataset):
     source = np.transpose(source, (1, 2, 0)) 
     target = np.transpose(target, (1, 2, 0))
     # covert to uint8
-    source = clip_to_uint8(source)
-    target = clip_to_uint8(target)
+    source = utils.clip_to_uint8(source)
+    target = utils.clip_to_uint8(target)
     
     f, axarr = plt.subplots(1, 2)               # make two plots on one figure
     axarr[0].imshow(source)                     # show the image
@@ -130,33 +90,29 @@ each training example to make it more difficult for the network, i.e., the netwo
 magnitude of noise while removing it
 """
 
-class AugmentGaussian:
-    def __init__(self, train_stddev_rng_range):
-        assert len(train_stddev_rng_range) == 2
-        self.minval, self.maxval = train_stddev_rng_range
-        self.minval = self.minval / 255
-        self.maxval = self.maxval / 255
-
-    def __call__(self, x):
-        rng_stddev = (self.maxval - self.minval) * torch.rand(1) + self.minval
-        return x + torch.randn(x.size()) * rng_stddev
-
 """Let's create our noise augmentor, which randomize the noise standard deviation for source and target image separately."""
 
 additive_gaussian_noise_train = AugmentGaussian((0, 50))
+additive_poisson_noise_train = AugmentPoisson((0, 50))
+
 
 # this time our 'noise_transform' Callable returns two images agumented with Gaussian noise with different standard deviation.
 TRAIN_NOISE_TRANSFORM = lambda x: (additive_gaussian_noise_train(x), additive_gaussian_noise_train(x))
+POISSON_NOISE_TRANSFORM = lambda x: (additive_poisson_noise_train(x), additive_poisson_noise_train(x))
 
 # create the training Dataset with our noise transformer
 TRAIN_DATA_PATH = 'vdsr_train'
 train_data = VdsrDataset(TRAIN_DATA_PATH, noise_transform=TRAIN_NOISE_TRANSFORM)
+train_data_clean = VdsrDataset(TRAIN_DATA_PATH, noise_transform=lambda x: (x, x))
+train_data_poisson = VdsrDataset(TRAIN_DATA_PATH, noise_transform=POISSON_NOISE_TRANSFORM)
 # create the DataLoader with batch size of 4
-train_loader = DataLoader(train_data, batch_size=4, shuffle=True)
+train_loader_noise = DataLoader(train_data, batch_size=4, shuffle=True)
+train_loader_clean = DataLoader(train_data_clean, batch_size=4, shuffle=True)
+train_loader_poisson = DataLoader(train_data_poisson, batch_size=4, shuffle=True)
 
 show_random_dataset_image(train_data)
 
-"""Create validation loader. This time we use a fixed standard deviation of 25 for the additive Gaussian noise. Notice that now the 2nd (i.e. target) image returned from the loader is not augmented with noise. Why?"""
+"""Create validation loader. This time we use a fixed standard deviation of 25 for the additive Gaussian noise. Notice that now the 2nd (i.e. target) image returned from the loader is not augmented with noise. Why?""" # Because the image on the right then becomes the validation image
 
 additive_gaussian_noise_val = AugmentGaussian((25, 25))
 # apply noise augmentation only to the input, leaving the target clean
@@ -177,92 +133,6 @@ We're going to use the same architectue as described in Appendix 1 of  J. Lehtin
 Notice that denoising is a regression problem, so this time we're not normalizing the output of the last convolution with a Sigmoid function and take the linear activation directly instead.
 """
 
-class UNet(nn.Module):
-    """ UNet implementation
-    Arguments:
-      in_channels: number of input channels
-      out_channels: number of output channels
-    """
-    
-    # Convolutional block for single layer of the decoder / encoder
-    # we apply to 2d convolutions with leaky ReLU activation
-    def _conv_block(self, in_channels, out_channels, block_num):
-        conv_blocks = []
-        for i in range(block_num):
-            if i == 0:
-                in_ch = in_channels
-            else:
-                in_ch = out_channels
-            # add convolutional layer
-            conv_blocks.append(nn.Conv2d(in_ch, out_channels, kernel_size=3, padding=1))
-            # add batchnorm for better training stability
-            conv_blocks.append(nn.BatchNorm2d(out_channels))
-            # add activation function
-            conv_blocks.append(nn.LeakyReLU(negative_slope=0.1, inplace=True))
-            
-        return nn.Sequential(*conv_blocks)       
-
-
-    # upsampling via nearest-neighbor interpolation
-    def _upsample(self, x, size):
-        return F.interpolate(x, size=size, mode='nearest')
-    
-    # we do use a final Sigmoid activation this time, since we're dealing with a regression problem
-    def __init__(self, in_channels=3, out_channels=3):
-        super().__init__()
-        
-        # the depth (= number of encoder / decoder levels) is
-        # hard-coded to 5
-        self.depth = 5
-        
-        # all lists of conv layers (or other nn.Modules with parameters) must be wraped
-        # itnto a nn.ModuleList
-        
-        # modules of the encoder path
-        self.encoder = nn.ModuleList([self._conv_block(in_channels, 48, 2),
-                                      self._conv_block(48, 48, 1),
-                                      self._conv_block(48, 48, 1),
-                                      self._conv_block(48, 48, 1),
-                                      self._conv_block(48, 48, 1)])
-        # the base convolution block
-        self.base = self._conv_block(48, 48, 1)
-        # modules of the decoder path
-        self.decoder = nn.ModuleList([self._conv_block(96, 96, 2),
-                                      self._conv_block(144, 96, 2),
-                                      self._conv_block(144, 96, 2),
-                                      self._conv_block(144, 96, 2),
-                                      self._conv_block(144, 64, 2)])
-        
-        # the pooling layers; we use 2x2 MaxPooling
-        self.poolers = nn.ModuleList([nn.MaxPool2d(2) for _ in range(self.depth)])
-        
-        # output conv with linear activation
-        self.out_conv = nn.Conv2d(64, out_channels, 1)
-    
-    def forward(self, input):
-        x = input
-        # apply encoder path
-        encoder_out = []
-        for level in range(self.depth):
-            x = self.encoder[level](x)
-            encoder_out.append(x)
-            x = self.poolers[level](x)
-
-        # apply base
-        x = self.base(x)
-        
-        # apply decoder path
-        encoder_out = encoder_out[::-1]
-        for level in range(self.depth):
-            # get the spatial dimension of the corresponding encoder features
-            size = encoder_out[level].size()[2:]
-            x = self._upsample(x, size)
-            x = self.decoder[level](torch.cat((x, encoder_out[level]), dim=1))
-        
-        # apply output conv
-        x = self.out_conv(x)
-        return x
-
 """Having the network architecture implemented, let's make a single forward pass with a random image in order to see that it's working"""
 
 m = UNet(in_channels=3, out_channels=3)
@@ -282,92 +152,7 @@ Since we're using the additive Gaussian noise, which has a zero mean, we will us
 
 LOSS_CRITERION = nn.MSELoss()
 
-class PSNR:
-    def __call__(self, image_true, image_test):
-        image_true = clip_to_uint8(image_true)
-        image_test = clip_to_uint8(image_test)
-        image_true = image_true.detach().cpu().numpy()
-        image_test = image_test.detach().cpu().numpy()
-        return peak_signal_noise_ratio(image_true, image_test)
-    
 EVAL_METRIC = PSNR()
-
-"""## Training"""
-
-# apply training for one epoch
-def train(model, loader, optimizer, loss_function,
-          epoch, log_interval=100, tb_logger=None):
-
-    # set the model to train mode
-    model.train()
-    # iterate over the batches of this epoch
-    for batch_id, (x, y) in enumerate(loader):
-        # move input and target to the active device (either cpu or gpu)
-        x, y = x.to(device), y.to(device)
-        
-        # zero the gradients for this iteration
-        optimizer.zero_grad()
-        
-        # apply model, calculate loss and run backwards pass
-        prediction = model(x)
-        loss = LOSS_CRITERION(prediction, y)
-        loss.backward()
-        
-        # perform a single optimization step
-        optimizer.step()
-        
-        # log to console
-        if batch_id % log_interval == 0:
-            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-                  epoch, batch_id * len(x),
-                  len(loader.dataset),
-                  100. * batch_id / len(loader), loss.item()))
-
-            # log to tensorboard
-            if tb_logger is not None:
-                step = epoch * len(loader) + batch_id
-                tb_logger.add_scalar(tag='train_loss', scalar_value=loss.item(), global_step=step)
-                
-                x, y, prediction = clip_to_uint8(x), clip_to_uint8(y), clip_to_uint8(prediction)
-                tb_logger.add_images(tag='input', img_tensor=x.to('cpu'), global_step=step)
-                tb_logger.add_images(tag='target', img_tensor=y.to('cpu'), global_step=step)
-                tb_logger.add_images(tag='prediction', img_tensor=prediction.to('cpu').detach(), global_step=step)
-
-# run validation after training epoch
-def validate(model, loader, loss_function, metric, step=None, tb_logger=None):
-    # set model to eval mode
-    model.eval()
-    # running loss and metric values
-    val_loss = 0
-    val_metric = 0
-    
-    # disable gradients during validation
-    with torch.no_grad():
-        # iterate over validation loader and update loss and metric values
-        for x, y in loader:
-            x, y = x.to(device), y.to(device)
-            prediction = model(x)
-            loss = LOSS_CRITERION(prediction, y)
-            eval_score = EVAL_METRIC(y, prediction)
-            
-            val_loss += loss
-            val_metric += eval_score
-    
-    # normalize loss and metric
-    val_loss /= len(loader)
-    val_metric /= len(loader)
-    
-    if tb_logger is not None:
-        assert step is not None, "Need to know the current step to log validation results"
-        tb_logger.add_scalar(tag='val_loss', scalar_value=val_loss, global_step=step)
-        tb_logger.add_scalar(tag='val_metric', scalar_value=val_metric, global_step=step)
-        # we always log the last validation images
-        x, y, prediction = clip_to_uint8(x), clip_to_uint8(y), clip_to_uint8(prediction)
-        tb_logger.add_images(tag='val_input', img_tensor=x.to('cpu'), global_step=step)
-        tb_logger.add_images(tag='val_target', img_tensor=y.to('cpu'), global_step=step)
-        tb_logger.add_images(tag='val_prediction', img_tensor=prediction.to('cpu'), global_step=step)
-        
-    print('\nValidate: Average loss: {:.4f}, Average Metric: {:.4f}\n'.format(val_loss, val_metric))
 
 # check if we have  a gpu
 if torch.cuda.is_available():
@@ -379,7 +164,6 @@ else:
 
 # Commented out IPython magic to ensure Python compatibility.
 # start a tensorboard writer
-logger = SummaryWriter('runs/noise2noise')
 # %tensorboard --logdir runs
 
 # helper function to create the optimizer
@@ -395,13 +179,21 @@ net = net.to(device)
 # use adam optimizer
 optimizer = create_optimizer(learning_rate=0.01, model=net)
 
+def namestr(obj, namespace):
+    return [name for name in namespace if namespace[name] is obj]
+
+loaders = [(train_loader_poisson, 'train_loader_poisson'),(train_loader_noise, 'train_loader_noise'), (train_loader_clean, 'train_loader_clean')]
+
 n_epochs = 40
-for epoch in range(n_epochs):
-    # train
-    train(net, train_loader, optimizer, LOSS_CRITERION, epoch, log_interval=25, tb_logger=logger)
-    step = epoch * len(train_loader.dataset)
-    # validate
-    validate(net, val_loader, LOSS_CRITERION, EVAL_METRIC, step=step, tb_logger=logger)
+for train_loader, loader_name in loaders:
+    logger = SummaryWriter(f'runs/noise2noise_{loader_name}')
+    print(f"\n\nTraining noise2noise for {n_epochs} epochs with loader {loader_name}")
+    for epoch in tqdm.tqdm(range(n_epochs), total=n_epochs):
+        # train
+        train(net, train_loader, optimizer, LOSS_CRITERION, epoch, log_interval=25, tb_logger=logger, device=device)
+        step = epoch * len(train_loader.dataset)
+        # validate
+        validate(net, val_loader, LOSS_CRITERION, EVAL_METRIC, step=step, tb_logger=logger, device = device)
 
 """## Exercises
 
@@ -412,3 +204,6 @@ TRAIN_NOISE_TRANSFORM = lambda x: (additive_gaussian_noise_train(x), x)
 ```
 2. Train noise2noise with different noise model, e.g. Poisson noise with varying lambda.
 """
+
+
+

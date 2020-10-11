@@ -22,30 +22,45 @@ Adapted from the pytorch example of Constantin Pape.
 # %matplotlib inline
 # %load_ext tensorboard
 import os
+import time
+import sys
+sys.path.append(os.path.abspath('utils'))
 import imageio
 import matplotlib.pyplot as plt
 import numpy as np
-from PIL import Image
-from scipy.ndimage import binary_erosion
 import torch
+import torch.nn as nn
+import utils
+import sklearn.metrics as metrics
+import tqdm
+import torchvision
+from training_utils import train, validate
+from PIL import Image
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.tensorboard import SummaryWriter
-import torch.nn as nn
 from torch.nn import functional as F
 from torchvision import transforms
-
+from nuclei_dataset import NucleiDataset
+from random_crop import RandomCrop
+from random_rotate import RandomRotate
+from unet import UNet
+from unet_batchnorm import UNet_BatchNorm
+from unet_elu import UNet_ELU
+from dice_coefficient import DiceCoefficient
+from dice_loss import DiceLoss
+from unet_five_layers import UNet_Five_Layers
 """## Data loading and preprocessing
 
 For this exercise we will be using the Kaggle 2018 Data Science Bowl data again, but this time we will try to segment it with the state of the art network.
 Let's start with loading the data as before.
 """
 
-!wget --load-cookies /tmp/cookies.txt "https://docs.google.com/uc?export=download&confirm=$(wget --quiet --save-cookies /tmp/cookies.txt --keep-session-cookies --no-check-certificate 'https://docs.google.com/uc?export=download&id=1EbvS10-83JGNE2nlBxIV42izY1TOr115' -O- | sed -rn 's/.*confirm=([0-9A-Za-z_]+).*/\1\n/p')&id=1EbvS10-83JGNE2nlBxIV42izY1TOr115" -O kaggle_data.zip && rm -rf /tmp/cookies.txt
-!unzip -qq kaggle_data.zip && rm kaggle_data.zip
+# !wget --load-cookies /tmp/cookies.txt "https://docs.google.com/uc?export=download&confirm=$(wget --quiet --save-cookies /tmp/cookies.txt --keep-session-cookies --no-check-certificate 'https://docs.google.com/uc?export=download&id=1EbvS10-83JGNE2nlBxIV42izY1TOr115' -O- | sed -rn 's/.*confirm=([0-9A-Za-z_]+).*/\1\n/p')&id=1EbvS10-83JGNE2nlBxIV42izY1TOr115" -O kaggle_data.zip && rm -rf /tmp/cookies.txt
+# !unzip -qq kaggle_data.zip && rm kaggle_data.zip
 
 """Now make sure that the data was successfully extracted: if everything went fine, you should have folders `nuclei_train_data` and `nuclei_val_data` in your working directory. Check if it is the case:"""
 
-!ls -ltrh
+# !ls -ltrh
 
 """__TASK__: Use `ls` to explore the contents of both folders. Running `ls your_folder_name` should display you what is stored in the folder of your interest.
 
@@ -54,9 +69,11 @@ Let's start with loading the data as before.
 Hint: you can use the following function to display the images:
 """
 
+
+
 def show_one_image(image_path):
-  image = imageio.imread(image_path)
-  plt.imshow(image)
+    image = imageio.imread(image_path)
+    plt.imshow(image)
 
 """What one would normally start with in any machine learning pipeline is writing a dataset - a class that will fetch the training samples. In the previous exercises we did not have to worry about it, since we used the classic datasets available in the torchvision library. However, once you switch to using your own data, you would have to figure out how to fetch the data yourself. Luckily most of the functionality is already provided by PyTorch, but what you need to do is to write a class, that will actually supply the dataloader with training samples - a Dataset.
 
@@ -68,53 +85,9 @@ For this exercise you will not have to do it yourself yet, but please carefully 
 """
 
 #any PyTorch dataset class should inherit the initial torch.utils.data.Dataset
-class NucleiDataset(Dataset):
-    """ A PyTorch dataset to load cell images and nuclei masks """
-    def __init__(self, root_dir, transform=None):
-        self.root_dir = root_dir  # the directory with all the training samples
-        self.samples = os.listdir(root_dir) # list the samples
-        self.transform = transform    # transformations to apply to both inputs and targets
-        #  transformations to apply just to inputs
-        self.inp_transforms = transforms.Compose([transforms.Grayscale(), # some of the images are RGB
-                                                  transforms.ToTensor(),
-                                                  transforms.Normalize([0.5], [0.5])
-                                                  ])
-        # transformations to apply just to targets
-        self.mask_transforms = transforms.ToTensor()
-
-    # get the total number of samples
-    def __len__(self):
-        return len(self.samples)
-
-    # fetch the training sample given its index
-    def __getitem__(self, idx):
-        img_path = os.path.join(self.root_dir, self.samples[idx],
-                                'images', self.samples[idx]+'.png')
-        # we'll be using Pillow library for reading files
-        # since many torchvision transforms operate on PIL images 
-        image = Image.open(img_path)
-        image = self.inp_transforms(image)
-        masks_dir = os.path.join(self.root_dir, self.samples[idx], 'masks')
-        # masks directory has multiple images - one mask per nucleus
-        masks_list = os.listdir(masks_dir)
-        # create an empty array
-        mask = torch.zeros_like(image)
-        # iterate through the images to sum them up to one mask
-        for mask_name in masks_list:
-            one_nuclei_mask = Image.open(os.path.join(masks_dir, mask_name))
-            # erode the image by one pixel
-            # TASK: guess why we are doing it
-            one_nuclei_mask = binary_erosion(one_nuclei_mask)
-            one_nuclei_mask = self.mask_transforms(one_nuclei_mask)
-            # add this nucleus to the mask
-            mask += one_nuclei_mask
-        if self.transform is not None:
-            image, mask = self.transform([image, mask])
-        return image, mask
-
 """Now let's load the dataset and visualize it with a simple function:"""
 
-TRAIN_DATA_PATH = 'nuclei_train_data'
+TRAIN_DATA_PATH = './nuclei_train_data'
 train_data = NucleiDataset(TRAIN_DATA_PATH)
 
 def show_random_dataset_image(dataset):
@@ -125,44 +98,15 @@ def show_random_dataset_image(dataset):
     axarr[1].imshow(mask[0])                    # show the masks
     _ = [ax.axis('off') for ax in axarr]        # remove the axes
     print('Image size is %s' % {img[0].shape})
-    plt.show()
 
 show_random_dataset_image(train_data)
-
+# implement
 """As you can probably see, if you clicked enough times, some of the images are really huge! What happens if we load them into memory and run the model on them? We might run out of memory. That's why normally, when training networks on images or volumes one has to be really careful about the sizes. In practice, you would want to regulate their size. Additional reason for restraining the size is: if we want to train in batches (faster and more stable training), we need all the images in the batch to be of the same size. That is why we prefer to either resize or crop them.
 
 Here is a function (well, actually a class), that will apply a transformation 'random crop'. Notice that we apply it to images and masks simultaneously to make sure they correspond, despite the randomness.
 
 In case anybody is wondering why we have to bother to write a whole class for it instead of simply coping the images directly in the dataset: we want to keep the code modular. We want to write one dataset object, and then we can try all the possible transforms with this one dataset. Similarly, we want to write one Randomcrop transform object, and then we can reuse it for any other image datasets we night have in the future.
 """
-
-class RandomCrop(object):
-    """Crop randomly the input image and the output mask"""
-    def __init__(self, crop_size):
-        # check if the crop size is of a valid type
-        assert isinstance(crop_size, (int, tuple, list))
-        if isinstance(crop_size, int):
-            # if the crop size is an integer, we use the same for both dimensions
-            self.output_size = (crop_size, crop_size)
-        else:
-            assert len(crop_size) == 2
-            self.crop_size = crop_size
-
-    # this function makes our class callable 
-    def __call__(self, sample):
-        # we need to crop both input and mask at the same time
-        assert len(sample) == 2
-        image, mask = sample
-        # the first dimension is channels, then width, then height
-        w, h = image.shape[1:]
-        new_w, new_h = self.output_size
-        # choose a random place to crop
-        top = np.random.randint(0, h - new_h) if h - new_h > 0 else 0
-        left = np.random.randint(0, w - new_w) if w - new_w > 0 else 0
-        # crop and return
-        image = image[:, left: left + new_w, top: top + new_h]
-        mask = mask[:, left: left + new_w, top: top + new_h]
-        return image, mask
 
 """PS: PyTorch already has quite a bunch of all possible data transforms, so if you need one, check [here](https://pytorch.org/docs/stable/torchvision/transforms.html). The biggest problem with them is that they are clearly separated into transforms applied to PIL images (remember, we initially load the images as PIL.Image?) and torch.tensors (remember, we converted the images into tensors by calling transforms.ToTensor()?). This can be incredibly annoying if for some reason you might need to transorm your images to tensors before applying any other transforms or you don't want to use PIL library at all."""
 
@@ -173,7 +117,7 @@ show_random_dataset_image(train_data)
 
 """And the same for the validation data:"""
 
-VAL_DATA_PATH = 'nuclei_val_data'
+VAL_DATA_PATH = './nuclei_val_data'
 val_data = NucleiDataset(VAL_DATA_PATH, RandomCrop(256))
 val_loader = DataLoader(val_data, batch_size=5)
 
@@ -192,98 +136,6 @@ In the encoder pass, the input image is successively downsampled via max-pooling
 In adddition, it has skip connections, that bridge the output from an encoder to the corresponding decoder.
 """
 
-class UNet(nn.Module):
-    """ UNet implementation
-    Arguments:
-      in_channels: number of input channels
-      out_channels: number of output channels
-      final_activation: activation applied to the network output
-    """
-    
-    # _conv_block and _upsampler are just helper functions to
-    # construct the model.
-    # encapsulating them like so also makes it easy to re-use
-    # the model implementation with different architecture elements
-    
-    # Convolutional block for single layer of the decoder / encoder
-    # we apply to 2d convolutions with relu activation
-    def _conv_block(self, in_channels, out_channels):
-        return nn.Sequential(nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
-                             nn.ReLU(),
-                             nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
-                             nn.ReLU())       
-
-
-    # upsampling via transposed 2d convolutions
-    def _upsampler(self, in_channels, out_channels):
-        return nn.ConvTranspose2d(in_channels, out_channels,
-                                kernel_size=2, stride=2)
-    
-    def __init__(self, in_channels=1, out_channels=1, 
-                 final_activation=None):
-        super().__init__()
-        
-        # the depth (= number of encoder / decoder levels) is
-        # hard-coded to 4
-        self.depth = 4
-
-        # the final activation must either be None or a Module
-        if final_activation is not None:
-            assert isinstance(final_activation, nn.Module), "Activation must be torch module"
-        
-        # all lists of conv layers (or other nn.Modules with parameters) must be wraped
-        # itnto a nn.ModuleList
-        
-        # modules of the encoder path
-        self.encoder = nn.ModuleList([self._conv_block(in_channels, 16),
-                                      self._conv_block(16, 32),
-                                      self._conv_block(32, 64),
-                                      self._conv_block(64, 128)])
-        # the base convolution block
-        self.base = self._conv_block(128, 256)
-        # modules of the decoder path
-        self.decoder = nn.ModuleList([self._conv_block(256, 128),
-                                      self._conv_block(128, 64),
-                                      self._conv_block(64, 32),
-                                      self._conv_block(32, 16)])
-        
-        # the pooling layers; we use 2x2 MaxPooling
-        self.poolers = nn.ModuleList([nn.MaxPool2d(2) for _ in range(self.depth)])
-        # the upsampling layers
-        self.upsamplers = nn.ModuleList([self._upsampler(256, 128),
-                                         self._upsampler(128, 64),
-                                         self._upsampler(64, 32),
-                                         self._upsampler(32, 16)])
-        # output conv and activation
-        # the output conv is not followed by a non-linearity, because we apply
-        # activation afterwards
-        self.out_conv = nn.Conv2d(16, out_channels, 1)
-        self.activation = final_activation
-    
-    def forward(self, input):
-        x = input
-        # apply encoder path
-        encoder_out = []
-        for level in range(self.depth):
-            x = self.encoder[level](x)
-            encoder_out.append(x)
-            x = self.poolers[level](x)
-
-        # apply base
-        x = self.base(x)
-        
-        # apply decoder path
-        encoder_out = encoder_out[::-1]
-        for level in range(self.depth):
-            x = self.upsamplers[level](x)
-            x = self.decoder[level](torch.cat((x, encoder_out[level]), dim=1))
-        
-        # apply output conv and activation (if given)
-        x = self.out_conv(x)
-        if self.activation is not None:
-            x = self.activation(x)
-        return x
-
 """## Loss and distance metrics
 
 The next step to do would be writing a loss function - a metric that will tell us how close we are to the desired output. This metric should be differentiable, since this is the value to be backpropagated. The are [multiple losses](https://lars76.github.io/2018/09/27/loss-functions-for-segmentation.html) we could use for the segmentation task.
@@ -293,7 +145,6 @@ Take a moment to think which one is better to use. If you are not sure, don't fo
 __TASK__: implement your loss (or take one from pytorch):
 """
 
-YOUR_LOSS_NAME = # implement
 
 """We will use the [Dice Coefficeint](https://en.wikipedia.org/wiki/S%C3%B8rensen%E2%80%93Dice_coefficient) to evaluate the network predictions.
 We can use it for validation if we interpret set $a$ as predictions and $b$ as labels. It is often used to evaluate segmentations with sparse foreground, because the denominator normalizes by the number of foreground pixels.
@@ -303,87 +154,10 @@ The Dice Coefficient is closely related to Jaccard Index / Intersection over Uni
 # sorensen dice coefficient implemented in torch
 # the coefficient takes values in [0, 1], where 0 is
 # the worst score, 1 is the best score
-class DiceCoefficient(nn.Module):
-    def __init__(self, eps=1e-6):
-        super().__init__()
-        self.eps = eps
-        
-    # the dice coefficient of two sets represented as vectors a, b ca be 
-    # computed as (2 *|a b| / (a^2 + b^2))
-    def forward(self, prediction, target):
-        intersection = (prediction * target).sum()
-        denominator = (prediction * prediction).sum() + (target * target).sum()
-        return (2 * intersection / denominator.clamp(min=self.eps))
-
 """## Training
 
 Let's start with writing training and validation functions. __TASK__: fix in all the TODOs to make the function run. You can use the function from the exercise2 as a template.
 """
-
-# apply training for one epoch
-def train(model, loader, optimizer, loss_function,
-          epoch, log_interval=100, log_image_interval=20, tb_logger=None):
-
-    # set the model to train mode
-    TODO: YOUR CODE HERE
-    # iterate over the batches of this epoch
-    for batch_id, (x, y) in enumerate(loader):
-        # move input and target to the active device (either cpu or gpu)
-        x, y = x.to(device), y.to(device)
-        
-        # zero the gradients for this iteration
-        TODO: YOUR CODE HERE
-        
-        # apply model, calculate loss and run backwards pass
-        TODO: YOUR CODE HERE
-        
-        # log to console
-        if batch_id % log_interval == 0:
-            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-                  epoch, batch_id * len(x),
-                  len(loader.dataset),
-                  100. * batch_id / len(loader), loss.item()))
-
-       # log to tensorboard
-        if tb_logger is not None:
-            step = epoch * len(loader) + batch_id
-            tb_logger.add_scalar(tag='train_loss', scalar_value=loss.item(), global_step=step)
-            # check if we log images in this iteration
-            if step % log_image_interval == 0:
-                tb_logger.add_images(tag='input', img_tensor=x.to('cpu'), global_step=step)
-                tb_logger.add_images(tag='target', img_tensor=y.to('cpu'), global_step=step)
-                tb_logger.add_images(tag='prediction', img_tensor=prediction.to('cpu').detach(), global_step=step)
-
-# run validation after training epoch
-def validate(model, loader, loss_function, metric, step=None, tb_logger=None):
-    # set model to eval mode
-    TODO: YOUR CODE HERE
-    # running loss and metric values
-    val_loss = 0
-    val_metric = 0
-    
-    # disable gradients during validation
-    TODO: YOUR CODE HERE
-        
-        # iterate over validation loader and update loss and metric values
-        for x, y in loader:
-            x, y = x.to(device), y.to(device)
-            TODO: YOUR CODE HERE
-    
-    # normalize loss and metric
-    val_loss /= len(loader)
-    val_metric /= len(loader)
-    
-    if tb_logger is not None:
-        assert step is not None, "Need to know the current step to log validation results"
-        tb_logger.add_scalar(tag='val_loss', scalar_value=val_loss, global_step=step)
-        tb_logger.add_scalar(tag='val_metric', scalar_value=val_metric, global_step=step)
-        # we always log the last validation images
-        tb_logger.add_images(tag='val_input', img_tensor=x.to('cpu'), global_step=step)
-        tb_logger.add_images(tag='val_target', img_tensor=y.to('cpu'), global_step=step)
-        tb_logger.add_images(tag='val_prediction', img_tensor=prediction.to('cpu'), global_step=step)
-        
-    print('\nValidate: Average loss: {:.4f}, Average Metric: {:.4f}\n'.format(val_loss, val_metric))
 
 """This time we will use GPU to train faster. Please make sure that your Notebook is running on GPU."""
 
@@ -395,33 +169,55 @@ else:
     print("GPU is not available")
     device = torch.device("cpu")
 
-# Commented out IPython magic to ensure Python compatibility.
-# start a tensorboard writer
-logger = SummaryWriter('runs/Unet')
-# %tensorboard --logdir runs
+nets = [UNet(1,1, final_activation=nn.Sigmoid()), UNet_BatchNorm(1,1,final_activation=nn.Sigmoid()), UNet_ELU(1,1, final_activation=nn.Sigmoid()), UNet_Five_Layers(1,1, final_activation=nn.Sigmoid())]
 
-# build a default unet with sigmoid activation
-# to normalize predictions to [0, 1]
-net = UNet(1, 1, final_activation=nn.Sigmoid())
-# move the model to GPU
-net = net.to(device)
+n_epochs = 15
+for net in nets:
+    for loss_fn in [torch.nn.MSELoss(), DiceLoss(), DiceCoefficient()]:
+        name = net.__class__.__name__
+        loss_name = loss_fn.__class__.__name__
+        print(f"\n\nTraining network {name} with loss {loss_name}")
+        logger = SummaryWriter(f'runs/log_{name}_{loss_name}')
+        net.to(device)
 
-# use adam optimizer
-TODO: YOUR CODE HERE
 
-# build the dice coefficient metric
-metric = DiceCoefficient()
+        loss_function = loss_fn
+        loss_function.to(device)
 
-# train for 25 epochs
-# during the training you can inspect the 
-# predictions in the tensorboard
-n_epochs = 25
-for epoch in range(n_epochs):
-    # train
-    TODO: YOUR CODE HERE
-    step = epoch * len(train_loader.dataset)
-    # validate
-    TODO: YOUR CODE HERE
+        # use adam optimizer
+        optimizer = torch.optim.Adam(net.parameters(), lr=1.e-3)
+
+        # build the dice coefficient metric
+        metric = DiceCoefficient()
+        # train for 25 epochs
+        start = int(time.time())
+        stop = 0
+        best_accuracy = 0.
+        checkpoint_name='./best_checkpoint_{name}_{loss_name}.tar'.format(name=name, loss_name=loss_name)
+        best_epoch = 0
+        for epoch in tqdm.tqdm(range(n_epochs), total=n_epochs):
+            # train
+            train(net, train_loader, optimizer, loss_function, epoch, tb_logger=logger, device=device)
+
+            step = epoch * len(train_loader.dataset)
+            # validate
+            _, acc = validate(net, val_loader, loss_function, metric, step=step, tb_logger=logger, device=device, optimizer=optimizer)
+
+            if acc > best_accuracy:
+                best_accuracy = acc
+                best_epoch = epoch
+                utils.save_checkpoint(net, optimizer, epoch, checkpoint_name)
+
+        images, _ = next(iter(train_loader))
+        images = images.to(device)
+        grid = torchvision.utils.make_grid(images)
+        logger.add_image('images', grid, 0)
+        logger.add_graph(net, images)
+        logger.close()
+
+        stop = int(time.time()) - start
+        print("Total training time {ttime} sec for network {name} {loss_name}".format(ttime=stop, name=name, loss_name=loss_name))
+        print("Best checkpoint is epoch #", best_epoch+1, "saved in", checkpoint_name, "for network {name} with loss {loss_name}".format(name=name, loss_name=loss_name))
 
 """## Additional Exercises 
 
@@ -432,7 +228,8 @@ for epoch in range(n_epochs):
     * use [ELU-Activations](https://pytorch.org/docs/stable/nn.html#torch.nn.ELU) instead of ReLU-Activations
 
 2. Use the Dice coefficient as loss function. Before we only used it for validation, but it is differentiable and can thus also be used as loss. Compare to the results from exercise 2. 
-Hint: The optimizer we use finds minima of the loss, but the minimal value for the Dice coefficient corresponds to a bad segmentation. How do we need to change the Dice coefficient to use it as loss nonetheless?
+
+   - implement: The optimizer we use finds minima of the loss, but the minimal value for the Dice coefficient corresponds to a bad segmentation. How do we need to change the Dice coefficient to use it as loss nonetheless?
 
 3. Add one more layer to the Unet model (currently it has 4). Compare the results.
 
@@ -440,4 +237,5 @@ Hint: The optimizer we use finds minima of the loss, but the minimal value for t
 
 1. Visualize the graph (model) that we are using with TensorBoard
 2. Write your own data transform (e.g., RandomRotate)
+
 """
