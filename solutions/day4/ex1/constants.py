@@ -11,7 +11,7 @@ PASCAL_CLASSES = [
     'cat',
     'chair',
     'cow',
-    'diningtable',
+    'dining table',
     'dog',
     'horse',
     'motorcycle',

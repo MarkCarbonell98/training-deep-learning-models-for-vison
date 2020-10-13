@@ -109,7 +109,7 @@ root_dir = "./PascalVOC2012"
 
 voc_dataset = VOCSegmentation(root_dir, year='2012', image_set='val', download=False)
 
-show_random_dataset_image(voc_dataset)
+# show_random_dataset_image(voc_dataset)
 
 """Before we move on let's define the 20 classes of objects avialable in the Pascal VOC dataset"""
 
@@ -125,25 +125,26 @@ show_random_dataset_image(voc_dataset)
 
 """Visualize the bounding boxes on a given image from the Pascal VOC dataset"""
 
-img, label_img = voc_dataset[2]
+indexes = torch.randint(0, len(voc_dataset), (20,))
+for index, i in enumerate(indexes):
+    fig = plt.figure(figsize=(8,8))
+    ax1 = fig.add_subplot(1, 2, 1)
+    ax2 = fig.add_subplot(1, 2, 2)
+    img, label_img = voc_dataset[i]
+    gt_classes, gt_boxes = find_boxes(label_img)
+    # plot_boxes(img, classes, boxes)
+    scores, pred_boxes = detect(img, detr, transform, device=device)
+    # plot_results(img, scores, boxes)
+    pred_classes = prob_to_classes(scores)
+    plot_demo_row(img, gt_classes, pred_classes, gt_boxes, pred_boxes, ax1, ax2)
 
-classes, boxes = find_boxes(label_img)
-
-plot_boxes(img, classes, boxes)
-
+# plt.show()
+    
 """## Using DETR
 Try DETRdemo model on the same image you've chosen above.
 """
 
-# take the same image from the loader
-im, _ = voc_dataset[2]
-
-# run the prediction
-scores, boxes = detect(im, detr, transform, device=device)
-
 """Let's now visualize the model predictions"""
-    
-plot_results(im, scores, boxes)
 
 """## Excercises
 
@@ -157,11 +158,38 @@ You can use the pseudo code below as a starting point
 bear in mind that COCO dataset contains 81 classes, whereas Pascal VOC contains 20 classes. For images where DETR model returns one of the 61 classes not present in the Pascal VOC, simply ignore the predicted bounding box instead of counting it as a False Positive.
 """
 
-def average_precision(gt_classes, gt_boxes, predicted_classes, predicted_boxes, iou_threshold):
+def calc_iou(gt_box, pred_box):
+    xmin = max(gt_box[0], pred_box[0])
+    ymin = max(gt_box[1], pred_box[1])
+    xmax = min(gt_box[2], pred_box[2])
+    ymax = min(gt_box[3], pred_box[3])
+
+    intersect = max(0, xmax - xmin + 1) * max(0, ymax - ymin + 1)
+    gt_area = (gt_box[2] - gt_box[0] + 1) * (gt_box[3] - gt_box[1] + 1)
+    pred_area = (pred_box[2] - pred_box[0] + 1) * (pred_box[3] - pred_box[1] + 1)
+    iou = intersect / float(gt_area - pred_area - intersect)
+    return iou
+
+def average_precision(gt_classes, gt_boxes, pred_classes, pred_boxes, iou_threshold):
+    # boxes format = (x_0, y_0, x_1, y_1)
+
+    tp = len([p for p in gt_classes if p in pred_classes])
+    precision = tp / len(gt_classes)
+    recall = tp / len(pred_classes)
+    tps = []
+    fps = []
+
+    for gt in gt_boxes:
+        for pred in pred_boxes:
+            iou = calc_iou(gt, pred)
+            if iou >= iou_threshold:
+                tps.append(pred)
+            else:
+                fps.append(pred)
 
     print("iou_threshold: ", iou_threshold)
-    print("predicted_boxes: ", predicted_boxes)
-    print("predicted_classes: ", predicted_classes)
+    print("pred_boxes: ", pred_boxes)
+    print("pred_classes: ", pred_classes)
     print("gt_boxes: ", gt_boxes)
     print("gt_classes: ", gt_classes)
     return 0.
@@ -173,17 +201,19 @@ iou_threshold = 0.5
 average_precision_list = []
 
 # iterate directly over the Dataset
+print(len(voc_dataset))
 for img, label in voc_dataset:
     # extact ground truth classes and ground truth boxes from the labeled image
     gt_classes, gt_boxes = find_boxes(label)
     # run the prediction with DETR
-    prob, boxes = detect(img, detr, transform, device=device)
+    pred_prob, pred_boxes = detect(img, detr, transform, device=device)
     
-    classes = prob_to_classes(prob)
+    pred_classes = prob_to_classes(pred_prob)
     
-    ap = average_precision(gt_classes, gt_boxes, classes, boxes, iou_threshold=iou_threshold)
+    ap = average_precision(gt_classes, gt_boxes, pred_classes, pred_boxes, iou_threshold)
     
     average_precision_list.append(ap)
+    break
     
 print(f'mAP@{iou_threshold}:', np.mean(average_precision_list))
 

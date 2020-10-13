@@ -89,18 +89,35 @@ def find_boxes(label_img, min_size=100):
     # iterate over instances and get the bounding box and the corresponding class
     for label, count in zip(labels, counts):
         # skip 0-label or instances smaller than 'min_size' pixels
-        if label == 0 or count < min_size:
-            continue
+        # if label == 0 or count < min_size:
+        #     continue
+
+        if label != 0 and count >= min_size:
+            # extract and save the bounding box
+            boxes.append(bbox(connected_components, label))
+
+            # get the class of the object with a given label
+            c, n = np.unique(label_img[connected_components == label], return_counts=True)
+            ind = c[n.argmax()]
+            classes.append(PASCAL_CLASSES[ind])
         
-        # extract and save the bounding box
-        boxes.append(bbox(connected_components, label))
-        
-        # get the class of the object with a given label
-        c, n = np.unique(label_img[connected_components == label], return_counts=True)
-        ind = c[n.argmax()]
-        classes.append(PASCAL_CLASSES[ind])
     
     return classes, boxes
+
+def plot_box(pil_img, classes, boxes, ax):
+    ax.imshow(pil_img)
+    for cl, (xmin, ymin, xmax, ymax), c in zip(classes, boxes, COLORS * 100):
+        ax.add_patch(plt.Rectangle((xmin, ymin), xmax - xmin, ymax - ymin,
+                                   fill=False, color=c, linewidth=3))
+        ax.text(xmin, ymin, cl, fontsize=15, bbox=dict(facecolor='yellow', alpha=0.5))
+    ax.axis('off')
+
+def plot_demo_row(pil_img, gt_classes, pred_classes, gt_boxes, pred_boxes, ax, ax2):
+    plot_box(pil_img, gt_classes, gt_boxes, ax)
+    ax.set_title("Predictions")
+    plot_box(pil_img, pred_classes, pred_boxes, ax2)
+    ax2.set_title("Ground Truth")
+
 
 def prob_to_classes(prob):
     return [COCO_CLASSES[p.argmax()] for p in prob]
