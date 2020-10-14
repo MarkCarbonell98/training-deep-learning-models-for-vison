@@ -23,7 +23,7 @@ def rescale_bboxes(out_bbox, size, device='cpu'):
     return b
 
 def detect(im, model, transform, device='cpu'):
-    # mean-std normalize the input image (batch-size: 1)
+    # # mean-std normalize the input image (batch-size: 1)
     img = transform(im).unsqueeze(0)
     img = img.to(device)
 
