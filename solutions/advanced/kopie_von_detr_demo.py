@@ -162,7 +162,7 @@ bear in mind that COCO dataset contains 81 classes, whereas Pascal VOC contains 
 
 def calc_ious(gt_boxes, pred_boxes):
     iou = torch.Tensor([0.])
-    if pred_boxes.shape[0] > 0:
+    if pred_boxes.shape[0] > 0 and gt_boxes.shape[0] > 0:
         new_n_gt = int(pred_boxes.shape[0])
         new_n_pred = int(gt_boxes.shape[0])
         gt_boxes = gt_boxes.repeat(new_n_gt, 1).to(device)
@@ -183,15 +183,24 @@ def calc_ious(gt_boxes, pred_boxes):
         iou = (intersect / (gt_area + pred_area - intersect)).view(new_n_pred, new_n_gt)
     return iou
 
+def column_or_1d(y):
+    y = np.asarray(y)
+    shape = np.shape(y)
+    if len(shape) == 1 or (len(shape) == 2 and shape[1] == 1):
+        return np.ravel(y)
+    else:
+        raise ValueError("Array cannot be converted to column or 1d")
 
 def binary_clf_curve(y_true, y_score):
+    y_score = column_or_1d(y_score)
+    y_true = column_or_1d(y_true)
+    y_true = (y_true == True)
     desc_score_indices = np.argsort(y_score, kind="mergesort")[::-1]
     y_score = y_score[desc_score_indices]
     y_true = y_true[desc_score_indices]
-    weight = 1
     distinct_value_indices = np.where(np.diff(y_score))[0]
     threshold_idxs = np.r_[distinct_value_indices, y_true.size -1]
-    tps = np.cumsum(y_true * weight, axis=None)[threshold_idxs]
+    tps = np.cumsum(y_true, axis=None)[threshold_idxs]
     fps = 1 + threshold_idxs - tps
     return fps, tps, y_score[threshold_idxs]
 
@@ -199,31 +208,38 @@ def precision_recall_curve(y_true, y_score):
     fps, tps, thresholds = binary_clf_curve(y_true, y_score)
     precision = tps / (tps + fps)
     precision[np.isnan(precision)] = 0
-    recall = 1 if tps[-1] == 0 else tps / tps[-1]
+    recall = [1] if tps[-1] == 0 else tps / tps[-1]
+
     last_ind = tps.searchsorted(tps[-1])
     sl = slice(last_ind, None, -1)
     return np.r_[precision[sl], 1], np.r_[recall[sl], 0], thresholds[sl]
 
 def binary_uninterpolated_average_precision(y_true, y_score):
-    precision, recall = precision_recall_curve(y_true, y_score)
+    precision, recall, _ = precision_recall_curve(y_true, y_score)
     return -np.sum(np.diff(recall) * np.array(precision)[:-1])
 
 def average_precision(gt_classes, gt_boxes, pred_classes, pred_boxes, iou_threshold):
     gt_boxes = torch.Tensor(gt_boxes)
     gt_boxes.to(device)
-    # print("gt_classes: ", gt_classes)
-    # print("gt_boxes: ", gt_boxes)
-    # print("pred_classes: ", pred_classes)
-    # print("pred_boxes: ", pred_boxes)
-    # print("iou_threshold: ", iou_threshold)
     ious = calc_ious(gt_boxes, pred_boxes)
     y_true = (ious >= iou_threshold).cpu().numpy()
     y_score = ious.cpu().numpy()
+    not_average_axis = 1
 
-    # precision, recall = precision_recall_curve(y_true, y_score)
-    
-    return 1
+    if y_true.ndim ==1:
+        y_true = y_true.reshape((-1,1))
+    if y_score.ndim ==1:
+        y_score = y_score.reshape((-1,1))
 
+    n_classes = y_score.shape[not_average_axis]
+    score = np.zeros((n_classes,))
+    for c in range(n_classes):
+        y_true_c = y_true.take([c], axis=not_average_axis).ravel()
+        y_score_c = y_score.take([c], axis=not_average_axis).ravel()
+        score[c] = binary_uninterpolated_average_precision(y_true_c, y_score_c)
+
+    res = np.average(score)
+    return res
 
 average_precision_list = []
 
@@ -245,7 +261,6 @@ for iou_threshold in [.4, .5, .75]:
             ap = average_precision(gt_classes, gt_boxes, pred_classes, pred_boxes, iou_threshold)
 
             average_precision_list.append(ap)
-            break
     print(f'mAP@{iou_threshold}:', np.mean(average_precision_list))
 
 # plt.show()

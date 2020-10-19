@@ -14,4 +14,8 @@ bear in mind that COCO dataset contains 81 classes, whereas Pascal VOC contains 
 
 1. The DETR tends to predict several bounding boxes of the same class around the object where a single bounding box should suffice. It has serious problems prediction books. And the dimension of the bounding boxes are not very accurate. Sometimes persons are only halfway into the predicted bounding box whereas in the GT they are completely included in the bounding box.
 
-2. The DETR model performed with 14.2% mAP on the `trainval` Pascal VOC 2012 dataset with an IoU threshold of 40%. The results came in descending order with higher IoU thresholds. Ranking 13.6% with IoU threshold of 50% and 12.6%  with the 75%. Interestingly, I found a bug in the `sklearn` implementation of the `average_precision` function which is documented [here](https://github.com/scikit-learn/scikit-learn/issues/8245) where the function returns a NaN value if the label list is composed of purely negative labels. 
+2. The DETR model performed with 62.0% mAP on the `trainval` Pascal VOC 2012 dataset with an IoU threshold of 40%. The results came in descending order with higher IoU thresholds. Ranking 60.3% with IoU threshold of 50% and 56.4  with the 75%. 
+
+Interestingly, I found a bug in the `sklearn` implementation of the `average_precision` function which is documented [here](https://github.com/scikit-learn/scikit-learn/issues/8245) where the function returns a NaN value if the label list is composed of purely negative labels.
+
+Therefore I decided to implement my own version of `sklearn.metrics.average_precision` in the `solutions/advanced/kopie_von_detr_demo.py` directory. I refactored the `calc_iou` function to a new `calc_ious` version which is vectorized with pytorch. Besides this I found and fixed the bug in `sklearn.metrics.average_precision` and now the recall accuracy is calculated correctly. I'm planning in doing a pull request to sklearn's repo to fix this issue soon.
